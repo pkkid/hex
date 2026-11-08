@@ -322,11 +322,34 @@ impl Profiles {
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Processed {
+        self.process_from(transcript, language, context, cancelled, true)
+    }
+
+    /// The selected mode's steps over text someone typed (Labs › Clean up
+    /// text): the dictation-only Labs steps (spoken formatting, spoken
+    /// symbols, filler words) are left out.
+    pub fn process_typed(
+        &self,
+        text: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> Processed {
+        self.process_from(text, "auto", context, cancelled, false)
+    }
+
+    fn process_from(
+        &self,
+        transcript: &str,
+        language: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+        spoken: bool,
+    ) -> Processed {
         let profile = self.select(context);
         // Labs › Spoken formatting starts here, ahead of every mode's
         // corrections, so it is off for raw dictation and meetings.
         let formatted;
-        let transcript = if crate::labs::spoken_formatting() {
+        let transcript = if spoken && crate::labs::spoken_formatting() {
             formatted = crate::dictation::spoken_formatting::apply(transcript);
             formatted.as_str()
         } else {
@@ -334,7 +357,7 @@ impl Profiles {
         };
         // Labs › Spoken symbols, likewise ahead of the corrections.
         let symbolized;
-        let transcript = if crate::labs::spoken_symbols() {
+        let transcript = if spoken && crate::labs::spoken_symbols() {
             symbolized = crate::dictation::spoken_symbols::apply(transcript);
             symbolized.as_str()
         } else {
@@ -347,7 +370,7 @@ impl Profiles {
         let transcript = match crate::dictation::filler_words::strip_if(
             transcript,
             language,
-            crate::labs::filler_words(),
+            spoken && crate::labs::filler_words(),
         ) {
             Some(stripped) => {
                 unfilled = stripped;
@@ -845,11 +868,30 @@ impl Processed {
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) {
+        use crate::personal_commands::Source;
+        self.apply_transformations_as(Source::Dictation, client, context, cancelled);
+    }
+
+    /// [`Self::apply_transformations`] for `source`, which a custom
+    /// transformation reads as `context.source`.
+    pub fn apply_transformations_as(
+        &mut self,
+        source: crate::personal_commands::Source,
+        client: &crate::personal_commands::TransformationClient,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) {
         if self.transformations.is_empty() || cancelled.load(Ordering::Acquire) {
             return;
         }
         let started = Instant::now();
-        let transformed = client.transform(&self.transformations, &self.text, context, cancelled);
+        let transformed = client.transform_as(
+            source,
+            &self.transformations,
+            &self.text,
+            context,
+            cancelled,
+        );
         let observation = self
             .observation
             .get_or_insert_with(|| ProcessingObservation {

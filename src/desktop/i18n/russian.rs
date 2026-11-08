@@ -1179,6 +1179,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Попробуйте другой запрос"),
     ("Descriptive meeting file names", "Описательные имена файлов встреч"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Переименовывает экспортированный Markdown встречи по её названию, как только его дадут заметки или переименование, сохраняя дату и время"),
+    ("Transform typed text", "Преобразовать набранный текст"),
+    ("Press a shortcut to run your Output steps on any field's text and replace it, without dictating", "Нажмите сочетание клавиш, чтобы применить шаги Вывода к тексту любого поля и заменить его без диктовки"),
+    ("Typed text", "Набранный текст"),
+    ("Same steps, no dictation", "Те же шаги, без диктовки"),
+    ("Runs the steps above on the focused field and replaces its text", "Применяет шаги выше к активному полю и заменяет его текст"),
 ];
 
 #[cfg(test)]

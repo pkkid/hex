@@ -277,6 +277,8 @@ pub(crate) enum HotkeyEvent {
     FinishPrinting(crate::control::PrintReply),
     Cancel,
     PasteLast,
+    /// Labs › Transform typed text: the focused field's text through the Output steps.
+    Cleanup,
     /// The Annotate key went down: nothing recording, a capture starts;
     /// recording, the capture host waits to tell a tap from a hold.
     Capture,
@@ -327,6 +329,8 @@ pub(crate) struct HotkeyOptions {
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Dictate without processing, while it is bound.
     pub(crate) raw_dictation: Option<LinuxHotkey>,
+    /// Labs › Transform typed text, while it is on and bound.
+    pub(crate) cleanup: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
@@ -556,14 +560,16 @@ enum Shortcut {
     PasteLast,
     Capture,
     RawDictation,
+    Cleanup,
 }
 
 impl Shortcut {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Dictation,
         Self::PasteLast,
         Self::Capture,
         Self::RawDictation,
+        Self::Cleanup,
     ];
 
     fn index(self) -> usize {
@@ -577,6 +583,7 @@ impl Shortcut {
             Self::PasteLast => ("paste-last", "Paste last dictation"),
             Self::Capture => ("capture", "Annotate"),
             Self::RawDictation => ("raw-dictation", "Dictate without processing"),
+            Self::Cleanup => ("cleanup", "Transform typed text"),
         }
     }
 }
@@ -837,7 +844,8 @@ impl ShortcutState {
             Input::Pressed(Shortcut::PasteLast) | Input::Command(ShortcutCommand::PasteLast) => {
                 self.idle().then_some(HotkeyEvent::PasteLast)
             }
-            Input::Released(Shortcut::PasteLast) => None,
+            Input::Pressed(Shortcut::Cleanup) => self.idle().then_some(HotkeyEvent::Cleanup),
+            Input::Released(Shortcut::PasteLast | Shortcut::Cleanup) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
             Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
             Input::Command(command) => match command {
@@ -1146,6 +1154,7 @@ impl Backend {
                 .raw_dictation
                 .as_ref()
                 .map(|key| (Shortcut::RawDictation, key)),
+            options.cleanup.as_ref().map(|key| (Shortcut::Cleanup, key)),
         ];
         let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
@@ -2257,6 +2266,17 @@ mod tests {
         test.press(Shortcut::PasteLast);
         test.command(Command::PasteLast);
         assert_eq!(test.events, [PasteLast, PasteLast, START]);
+    }
+
+    #[test]
+    fn cleanup_fires_only_while_idle() {
+        let mut test = Test::new(true);
+        test.press(Shortcut::Cleanup);
+        test.release(Shortcut::Cleanup);
+        assert_eq!(test.events, [HotkeyEvent::Cleanup]);
+        test.press(Shortcut::Dictation);
+        test.press(Shortcut::Cleanup);
+        assert_eq!(test.events, [HotkeyEvent::Cleanup, START]);
     }
 
     #[test]

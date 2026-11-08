@@ -463,7 +463,7 @@ pub(crate) fn shortcut_rule(
     use crate::app_settings::HotkeySlot;
     let target = match slot {
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
-        HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
+        HotkeySlot::PasteLast | HotkeySlot::Cleanup => ShortcutTarget::PasteLast,
         HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
         HotkeySlot::Cancel => ShortcutTarget::Cancel,
         #[cfg(hex_capture)]

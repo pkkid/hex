@@ -39,11 +39,19 @@ export default defineHexConfig({
 ```
 
 `transform(text, context)` returns a string or a promise of one. `context`
-describes the foreground app, each field present only when known:
+says why the transform runs and describes the foreground app, each app field
+present only when known:
 
 ```ts
-{ application?: string, browserHost?: string, browserUrl?: string, windowTitle?: string }
+{
+  source: "dictation" | "cleanup",
+  application?: string, browserHost?: string, browserUrl?: string, windowTitle?: string,
+}
 ```
+
+`source` is `"cleanup"` when Labs › Transform typed text (Linux) runs the
+steps over text already in a field, and `"dictation"` otherwise; return
+`text` unchanged to skip one of them.
 
 Selected transforms run in order after the mode's word replacements and
 optional AI rewrite. Don't reuse the built-in ids `lowercase`,

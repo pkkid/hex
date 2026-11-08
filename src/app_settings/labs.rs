@@ -13,6 +13,9 @@ pub struct LabsSettings {
     /// Provisional words in the focused text field as a Wayland input-method
     /// preedit, with the final text committed there (Linux Wayland).
     pub live_typing: bool,
+    /// Transform typed text: `cleanup_hotkey` runs the Output
+    /// steps over the focused field's text and paste the result back (Linux).
+    pub text_cleanup: bool,
     pub live_chapters: bool,
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
@@ -116,6 +119,7 @@ impl Default for LabsSettings {
             live_text: false,
             failure_notices: false,
             live_typing: false,
+            text_cleanup: false,
             live_chapters: false,
             playground: false,
             vocabulary_biasing: false,

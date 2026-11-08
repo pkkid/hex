@@ -629,7 +629,7 @@ impl Worker {
         request: &TransformationRequest,
         stop: &AtomicBool,
     ) -> std::result::Result<String, String> {
-        let context = json(&invocation_context(&request.context));
+        let context = json(&invocation_context(&request.context, request.source));
         let allowed = self.allowed(&loaded.script);
         let mut text = request.text.clone();
         for id in &request.ids {
@@ -770,12 +770,44 @@ struct TransformationRequest {
     ids: Vec<String>,
     text: String,
     context: ContextSnapshot,
+    source: Source,
     response: SyncSender<std::result::Result<String, String>>,
+}
+
+/// Why a transformation runs, which it reads as `context.source`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Source {
+    /// A dictation, before it pastes.
+    #[default]
+    Dictation,
+    /// Labs › Transform typed text, over text already in the focused field.
+    Cleanup,
+}
+
+impl Source {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Dictation => "dictation",
+            Self::Cleanup => "cleanup",
+        }
+    }
 }
 
 impl TransformationClient {
     pub fn transform(
         &self,
+        ids: &[String],
+        text: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> std::result::Result<String, String> {
+        self.transform_as(Source::Dictation, ids, text, context, cancelled)
+    }
+
+    /// [`Self::transform`] for `source`, which a custom transformation reads.
+    pub fn transform_as(
+        &self,
+        source: Source,
         ids: &[String],
         text: &str,
         context: &ContextSnapshot,
@@ -795,7 +827,7 @@ impl TransformationClient {
         for id in ids {
             if let Some(builtin) = builtin_transformation(id) {
                 if !custom.is_empty() {
-                    output = self.transform_custom(&custom, &output, context, cancelled)?;
+                    output = self.transform_custom(&custom, &output, context, source, cancelled)?;
                     custom.clear();
                 }
                 output = (builtin.apply)(&output);
@@ -804,7 +836,7 @@ impl TransformationClient {
             }
         }
         if !custom.is_empty() {
-            output = self.transform_custom(&custom, &output, context, cancelled)?;
+            output = self.transform_custom(&custom, &output, context, source, cancelled)?;
         }
         Ok(output)
     }
@@ -814,6 +846,7 @@ impl TransformationClient {
         ids: &[String],
         text: &str,
         context: &ContextSnapshot,
+        source: Source,
         cancelled: &AtomicBool,
     ) -> std::result::Result<String, String> {
         let active = self
@@ -838,6 +871,7 @@ impl TransformationClient {
                 ids: ids.to_vec(),
                 text: text.into(),
                 context: context.clone(),
+                source,
                 response: sender,
             })))
             .map_err(|error| match error {
@@ -925,6 +959,7 @@ fn remove_trailing_punctuation(text: &str) -> String {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InvocationContext {
+    source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     application: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -935,8 +970,9 @@ struct InvocationContext {
     window_title: Option<String>,
 }
 
-fn invocation_context(context: &ContextSnapshot) -> InvocationContext {
+fn invocation_context(context: &ContextSnapshot, source: Source) -> InvocationContext {
     InvocationContext {
+        source: source.as_str(),
         application: context.application.clone(),
         browser_host: context.browser_host().map(Into::into),
         browser_url: context.browser_url.as_ref().map(ToString::to_string),
@@ -1330,6 +1366,15 @@ mod tests {
         }
 
         fn transform(&self, ids: &[&str], text: &str) -> std::result::Result<String, String> {
+            self.transform_from(Source::Dictation, ids, text)
+        }
+
+        fn transform_from(
+            &self,
+            source: Source,
+            ids: &[&str],
+            text: &str,
+        ) -> std::result::Result<String, String> {
             let (response, result) = mpsc::sync_channel(1);
             self.worker.transform(
                 TransformationRequest {
@@ -1337,6 +1382,7 @@ mod tests {
                     ids: ids.iter().map(ToString::to_string).collect(),
                     text: text.into(),
                     context: ContextSnapshot::default(),
+                    source,
                     response,
                 },
                 &AtomicBool::new(false),
@@ -1395,6 +1441,25 @@ export default defineHexConfig({
             harness.error()
         );
         assert_eq!(harness.transform(&["exclaim"], "hi").unwrap(), "hi!");
+    }
+
+    #[test]
+    fn transformations_read_why_they_run_from_the_context() {
+        let harness = Harness::new(
+            r#"export default {
+  transformations: {
+    why: { name: "Why", transform: (text, context) => `${text}:${context.source}` },
+  },
+}
+"#,
+        );
+        assert_eq!(harness.transform(&["why"], "a").unwrap(), "a:dictation");
+        assert_eq!(
+            harness
+                .transform_from(Source::Cleanup, &["why"], "a")
+                .unwrap(),
+            "a:cleanup"
+        );
     }
 
     #[test]
@@ -1556,6 +1621,7 @@ export default defineHexConfig({
                 ids: vec!["echo".into()],
                 text: "a".into(),
                 context: ContextSnapshot::default(),
+                source: Source::Dictation,
                 response,
             },
             &AtomicBool::new(false),

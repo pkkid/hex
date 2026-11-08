@@ -118,10 +118,11 @@ pub enum Feature {
     MeetingDescriptiveFilenames,
     QuitClosesWindow,
     ExpireMeetingAudio,
+    TextCleanup,
 }
 
 impl Feature {
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -177,6 +178,7 @@ impl Feature {
         Self::MeetingDescriptiveFilenames,
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
+        Self::TextCleanup,
     ];
 
     /// The features this OS and build have.
@@ -256,6 +258,7 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::ExpireMeetingAudio
             | Self::NotchIndicator
+            | Self::TextCleanup
             | Self::QuitClosesWindow => Audience::Everyone,
         }
     }
@@ -315,6 +318,7 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::QuitClosesWindow
             | Self::ExpireMeetingAudio
+            | Self::TextCleanup
             | Self::FailureNotices => 20261107,
         }
     }
@@ -358,7 +362,8 @@ impl Feature {
             Self::SectionKeyAlone
             | Self::GnomeClipboardRestore
             | Self::GnomeMeetingCapsules
-            | Self::LiveTyping => cfg!(target_os = "linux"),
+            | Self::LiveTyping
+            | Self::TextCleanup => cfg!(target_os = "linux"),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -423,6 +428,7 @@ impl Feature {
             Self::LiveText => "live-text",
             Self::FailureNotices => "failure-notices",
             Self::LiveTyping => "live-typing",
+            Self::TextCleanup => "text-cleanup",
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
             Self::TerminalPaste => "terminal-paste",
@@ -484,6 +490,7 @@ impl Feature {
             Self::LiveText => "labs.live_text",
             Self::FailureNotices => "labs.failure_notices",
             Self::LiveTyping => "labs.live_typing",
+            Self::TextCleanup => "labs.text_cleanup",
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::TerminalPaste => "paste_with_shift",
@@ -549,6 +556,7 @@ impl Feature {
             Self::LiveText => settings.labs.live_text,
             Self::FailureNotices => settings.labs.failure_notices,
             Self::LiveTyping => settings.labs.live_typing,
+            Self::TextCleanup => settings.labs.text_cleanup,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
             Self::TerminalPaste => settings.paste_with_shift,
@@ -616,6 +624,7 @@ impl Feature {
             &mut labs.live_text,
             &mut labs.failure_notices,
             &mut labs.live_typing,
+            &mut labs.text_cleanup,
             &mut labs.live_chapters,
             &mut labs.vocabulary_biasing,
             &mut labs.mouse_shortcuts,
@@ -677,6 +686,7 @@ impl Feature {
             Self::LiveText => settings.labs.live_text = on,
             Self::FailureNotices => settings.labs.failure_notices = on,
             Self::LiveTyping => settings.labs.live_typing = on,
+            Self::TextCleanup => settings.labs.text_cleanup = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
@@ -787,6 +797,8 @@ const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
 const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
 /// The next bit above descriptive meeting file names.
 const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
+/// The next bit above failure notices.
+const TEXT_CLEANUP: u64 = FAILURE_NOTICES << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -824,6 +836,14 @@ pub fn failure_notices() -> bool {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn live_typing() -> bool {
     on(LIVE_TYPING) && Feature::LiveTyping.on_this_os()
+}
+
+/// Transform typed text: a shortcut runs the focused app's Output
+/// steps over the text in the focused field and pastes the result back
+/// (Linux; read as each cleanup starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn text_cleanup() -> bool {
+    on(TEXT_CLEANUP) && Feature::TextCleanup.on_this_os()
 }
 
 /// Live chapters while a meeting records.
@@ -1079,6 +1099,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             FAILURE_NOTICES,
         ),
         (Feature::LiveTyping, settings.live_typing, LIVE_TYPING),
+        (Feature::TextCleanup, settings.text_cleanup, TEXT_CLEANUP),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
         (Feature::Playground, settings.playground, PLAYGROUND),
         (

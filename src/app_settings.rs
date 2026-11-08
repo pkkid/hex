@@ -279,6 +279,10 @@ pub struct AppSettings {
     /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
     /// ignored while its Labs toggle is off.
     pub second_dictation_hotkey: Option<HotkeyBinding>,
+    /// Labs › Transform typed text: runs the Output steps over the focused field's
+    /// text and pastes the result back (Linux). Unbound by default and
+    /// ignored while its Labs toggle is off.
+    pub cleanup_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     /// Where the speech model runs (Linux and Windows).
@@ -417,6 +421,7 @@ impl Default for AppSettings {
             cancel_hotkey: HotkeyBinding::cancel_default(),
             raw_dictation_hotkey: None,
             second_dictation_hotkey: None,
+            cleanup_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
@@ -1036,6 +1041,18 @@ impl AppSettings {
             .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
     }
 
+    /// Labs › Transform typed text's binding while it takes effect: an OS that has
+    /// it, its toggle on, bound, and sharing no key with another active
+    /// shortcut. Otherwise Hex registers, grabs, and checks nothing for it.
+    pub fn active_cleanup_hotkey(&self) -> Option<&HotkeyBinding> {
+        if !crate::labs::Feature::TextCleanup.on_this_os() || !self.labs.text_cleanup {
+            return None;
+        }
+        self.cleanup_hotkey
+            .as_ref()
+            .filter(|binding| !self.hotkey_in_use(HotkeySlot::Cleanup, binding))
+    }
+
     /// Annotate is on: the person hasn't turned it off.
     #[cfg(hex_capture)]
     pub fn capture_on(&self) -> bool {
@@ -1096,6 +1113,14 @@ impl AppSettings {
             tracing::warn!("cleared a left-click second dictation shortcut");
             self.second_dictation_hotkey = None;
         }
+        if self
+            .cleanup_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click cleanup shortcut");
+            self.cleanup_hotkey = None;
+        }
         #[cfg(hex_capture)]
         if self.capture.hotkey.is_bare_primary_click() {
             tracing::warn!("replaced a left-click capture shortcut with the default");
@@ -1140,6 +1165,8 @@ pub enum HotkeySlot {
     Cancel,
     /// Labs › Screenshots (macOS).
     Screenshot,
+    /// Labs › Transform typed text (Linux).
+    Cleanup,
 }
 
 impl AppSettings {
@@ -1171,6 +1198,13 @@ impl AppSettings {
             && let Some(second) = &self.second_dictation_hotkey
         {
             others.push(second.clone());
+        }
+        if slot != HotkeySlot::Cleanup
+            && crate::labs::Feature::TextCleanup.on_this_os()
+            && self.labs.text_cleanup
+            && let Some(cleanup) = &self.cleanup_hotkey
+        {
+            others.push(cleanup.clone());
         }
         if cfg!(target_os = "macos") && self.meetings.available() {
             others.push(HotkeyBinding::paste_meeting_default());

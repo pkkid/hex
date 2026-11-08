@@ -29,6 +29,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
+├── Transform typed text no labs.text_cleanup + cleanup_hotkey (Linux) the shortcut runs the focused app's Output steps on the text in any field and puts the result back, without dictating
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -1498,6 +1499,22 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [dictation.rs](../../src/dictation.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
   golden's new card.
+- Transform typed text (`labs.text_cleanup`, Linux): `cleanup_hotkey`,
+  unbound by default and recorded in Output › Typed text, runs the focused
+  app's Output steps over text already in the focused field, without the
+  dictation-only Labs steps. Transformations read `context.source` as
+  `"cleanup"`. It selects all and copies, runs the steps on the paste
+  worker, copies the still-selected text again (Ctrl+C alone) to check
+  nobody touched it, then pastes over the selection. Empty, over 20,000
+  characters, a failed step, or a changed field leaves the text alone with
+  the error tone; a clipboard the person changed meanwhile is kept. Nothing
+  goes to History.
+  Checks: `cleanup_fires_only_while_idle` in
+  [linux/input.rs](../../src/linux/input.rs), the tests in
+  [linux/text_cleanup.rs](../../src/linux/text_cleanup.rs), and
+  `transformations_read_why_they_run_from_the_context` in
+  [personal_commands.rs](../../src/personal_commands.rs). Proof limit: the
+  key and clipboard round trip has no test.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
   (off by default, applied at once). While on, a **Playground** sidebar item,
   ⇧⌘D (View › Playground on macOS), or Ctrl+Shift+D swaps the window for a list of

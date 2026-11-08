@@ -137,7 +137,12 @@ declare module "@hex/commands" {
    * Returns the transformed text. It must finish within its `timeout`; if it
    * throws or runs out of time, Hex pastes the text it was given.
    */
-  export type Transformation = (text: string, context: HandlerContext) => string | Promise<string>
+  export interface TransformationContext extends HandlerContext {
+    /** Why it runs: a dictation before it pastes, or Labs › Transform typed text over typed text. */
+    readonly source: "dictation" | "cleanup"
+  }
+
+  export type Transformation = (text: string, context: TransformationContext) => string | Promise<string>
 
   export interface TransformationDefinition {
     readonly name: string

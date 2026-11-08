@@ -24,6 +24,8 @@ use crate::linux::remote_desktop::RemoteDesktop;
 use crate::linux::session::LinuxSession;
 
 const XK_V: u32 = 0x76;
+const XK_A: u32 = 0x61;
+const XK_C: u32 = 0x63;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
@@ -39,6 +41,55 @@ const PORTAL_IDLE: Duration = Duration::from_secs(15);
 const RESTORE_DELAY: Duration = Duration::from_millis(500);
 /// How long an X11 paste waits for modifiers no Hex shortcut holds.
 const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
+/// How long reading the clipboard waits for its owner (`wl-paste` on Wayland).
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
+/// The most text a clipboard read returns.
+const READ_CAP: u64 = 1024 * 1024;
+
+/// A key Hex presses with Ctrl in the focused window: A selects all, C
+/// copies, V pastes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Letter {
+    A,
+    C,
+    V,
+}
+
+impl Letter {
+    /// Its X keysym, which the RemoteDesktop portal also takes.
+    fn keysym(self) -> u32 {
+        match self {
+            Self::A => XK_A,
+            Self::C => XK_C,
+            Self::V => XK_V,
+        }
+    }
+
+    /// Its evdev code (`KEY_A`, `KEY_C`, `KEY_V`).
+    fn evdev(self) -> usize {
+        match self {
+            Self::A => 30,
+            Self::C => 46,
+            Self::V => EVDEV_KEY_V,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::A => "a",
+            Self::C => "c",
+            Self::V => "v",
+        }
+    }
+}
+
+/// Where a paste's original clipboard comes from.
+enum Original {
+    /// Read now, before the paste replaces it.
+    Read,
+    /// Read earlier by the caller, which put something else there since.
+    Given(Option<Snapshot>),
+}
 
 pub(crate) struct LinuxPaster {
     backend: Backend,
@@ -125,7 +176,7 @@ impl WaylandKeys {
         }
     }
 
-    fn send(&mut self, stop: &AtomicBool, paste_with_shift: bool) -> Result<()> {
+    fn send(&mut self, stop: &AtomicBool, letter: Letter, with_shift: bool) -> Result<()> {
         if matches!(self, Self::Unchosen) {
             *self = Self::choose();
         }
@@ -133,7 +184,7 @@ impl WaylandKeys {
             Self::Unchosen => unreachable!("chosen above"),
             Self::Wtype => {
                 let mut keys = Command::new("wtype");
-                keys.args(paste_keys(paste_with_shift));
+                keys.args(chord_keys(letter, with_shift));
                 run_helper(keys, &[], stop, HELPER_TIMEOUT)
                     .wrap_err("wtype could not send the paste shortcut")
             }
@@ -149,7 +200,13 @@ impl WaylandKeys {
                 // Without data-control, Mutter hands the new selection to the
                 // focused app only after wl-copy returns; a Ctrl+V sent at once
                 // pastes nothing or the previous clipboard (#578).
-                let mut settle = PORTAL_CLIPBOARD_SETTLE;
+                // Only a paste waits for the clipboard to reach the target.
+                let wait = if letter == Letter::V {
+                    PORTAL_CLIPBOARD_SETTLE
+                } else {
+                    Duration::ZERO
+                };
+                let mut settle = wait;
                 if state.session.is_none() {
                     let began = Instant::now();
                     let started = RemoteDesktop::start(stop)?;
@@ -158,7 +215,7 @@ impl WaylandKeys {
                         PORTAL_FOCUS_SETTLE
                     } else {
                         // Reopening already took part of the wait.
-                        PORTAL_CLIPBOARD_SETTLE.saturating_sub(began.elapsed())
+                        wait.saturating_sub(began.elapsed())
                     };
                     if started.restorable() {
                         let idle = Arc::downgrade(shared);
@@ -170,7 +227,7 @@ impl WaylandKeys {
                 let Some(session) = state.session.as_ref() else {
                     unreachable!("started above")
                 };
-                let result = session.paste(paste_with_shift);
+                let result = session.chord(letter.keysym() as i32, with_shift);
                 state.last_paste = Instant::now();
                 if result.is_err() {
                     state.session = None;
@@ -353,18 +410,133 @@ impl LinuxPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
-        self.paste_as(Mime::Text, text.as_bytes())
+        self.paste_as(Mime::Text, text.as_bytes(), Original::Read)
+    }
+
+    /// Pastes `text` like [`Self::paste`], then puts back `original`, the
+    /// clipboard the caller read before it copied something else there.
+    pub(crate) fn paste_over(&mut self, text: &str, original: Option<Snapshot>) -> Result<()> {
+        if text.trim().is_empty() {
+            return Err(eyre!("refusing to paste empty text"));
+        }
+        self.paste_as(Mime::Text, text.as_bytes(), Original::Given(original))
+    }
+
+    /// The person's clipboard, to put back later: while a paste still waits
+    /// to restore it, that paste's saved original (taken over, so the paste no
+    /// longer restores it), otherwise the clipboard now. `None` when it can't
+    /// be read (a Wayland desktop without data-control), with the log saying
+    /// why.
+    pub(crate) fn snapshot(&mut self) -> Option<Snapshot> {
+        let selection = self.selection.current();
+        {
+            let mut state = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+            let pending = state
+                .inserted
+                .as_ref()
+                .is_some_and(|(mime, bytes)| selection.holds(mime.wayland(), bytes));
+            if pending {
+                state.generation = state.generation.wrapping_add(1);
+                state.inserted = None;
+                return state.original.take();
+            }
+        }
+        selection
+            .snapshot()
+            .inspect_err(|error| {
+                tracing::info!(
+                    error = format!("{error:#}"),
+                    "the clipboard can't be read to put it back"
+                );
+            })
+            .ok()
+    }
+
+    /// Puts `original` back now, ending any restore a paste scheduled.
+    pub(crate) fn restore(&mut self, original: Snapshot) {
+        let mut state = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+        *state = Restore {
+            generation: state.generation.wrapping_add(1),
+            ..Restore::default()
+        };
+        if let Err(error) = self.selection.current().restore(original) {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not restore the clipboard"
+            );
+        }
+    }
+
+    /// Presses Ctrl with `letter` in the focused window, once the shortcut
+    /// that asked has let go of its keys.
+    pub(crate) fn press(&mut self, letter: Letter) -> Result<()> {
+        match &mut self.backend {
+            Backend::X11(paster) => {
+                paster.wait_for_modifier_release(&self.stop, &self.keys)?;
+                paster.chord(paster.keycode(letter)?, false)
+            }
+            Backend::Wayland(wayland) => {
+                self.keys.settle(&self.stop)?;
+                wayland.send(&self.stop, letter, false)
+            }
+        }
+    }
+
+    /// Empties the clipboard, so a copy that arrives can be told from one
+    /// that didn't.
+    pub(crate) fn clear(&mut self) -> Result<()> {
+        match &self.backend {
+            Backend::X11(_) => self.copy(""),
+            Backend::Wayland(_) => {
+                {
+                    let mut restore = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+                    *restore = Restore {
+                        generation: restore.generation.wrapping_add(1),
+                        ..Restore::default()
+                    };
+                }
+                require_wl_copy()?;
+                let mut clear = Command::new("wl-copy");
+                clear.arg("--clear");
+                run_helper(clear, &[], &self.stop, HELPER_TIMEOUT)
+                    .wrap_err("could not clear the Wayland clipboard")
+            }
+        }
+    }
+
+    /// The clipboard's text, empty when it holds none.
+    pub(crate) fn text(&self) -> Result<String> {
+        let bytes = match &self.backend {
+            Backend::X11(paster) => {
+                let atoms = &paster.clipboard.getter.atoms;
+                paster
+                    .clipboard
+                    .load(
+                        atoms.clipboard,
+                        atoms.utf8_string,
+                        atoms.property,
+                        READ_TIMEOUT,
+                    )
+                    .unwrap_or_default()
+            }
+            Backend::Wayland(_) => {
+                let mut read = Command::new("wl-paste");
+                read.args(["--no-newline", "--type", "text"]);
+                read_helper(read, &self.stop, READ_TIMEOUT)?.unwrap_or_default()
+            }
+        };
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Pastes a PNG (a capture's contact sheet) where the focus is, as the
     /// Mac's capture Paste does before its summary.
     pub(crate) fn paste_png(&mut self, png: &[u8]) -> Result<()> {
-        self.paste_as(Mime::Png, png)
+        self.paste_as(Mime::Png, png, Original::Read)
     }
 
     /// Pastes through the clipboard, then puts the previous clipboard back
     /// unless something newer replaced the paste first.
-    fn paste_as(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
+    fn paste_as(&mut self, mime: Mime, bytes: &[u8], original: Original) -> Result<()> {
         let restore = self.restore.clone();
         let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
@@ -374,7 +546,9 @@ impl LinuxPaster {
             .inserted
             .take()
             .is_some_and(|(mime, bytes)| selection.holds(mime.wayland(), &bytes));
-        if !previous_pending {
+        if let Original::Given(original) = original {
+            state.original = original;
+        } else if !previous_pending {
             state.original = match selection.snapshot() {
                 Ok(snapshot) => Some(snapshot),
                 Err(error) => {
@@ -417,7 +591,7 @@ impl LinuxPaster {
                 // Never read a pipe inherited by its clipboard-serving daemon.
                 self.keys.settle(&self.stop)?;
                 wayland
-                    .send(&self.stop, paste_with_shift)
+                    .send(&self.stop, Letter::V, paste_with_shift)
                     .map_err(|error| copied_only(error, paste_with_shift))?;
             }
         }
@@ -474,6 +648,8 @@ struct X11Paster {
     control: u8,
     shift: u8,
     v: u8,
+    a: u8,
+    c: u8,
 }
 
 impl X11Paster {
@@ -487,6 +663,8 @@ impl X11Paster {
             control: keymap.keycode(XK_CONTROL_L)?,
             shift: keymap.keycode(XK_SHIFT_L)?,
             v: keymap.keycode(XK_V)?,
+            a: keymap.keycode(XK_A)?,
+            c: keymap.keycode(XK_C)?,
         })
     }
 
@@ -512,18 +690,31 @@ impl X11Paster {
             .store(atoms.clipboard, target, bytes)
             .wrap_err("could not own the X11 clipboard")?;
         thread::sleep(Duration::from_millis(60));
-        for (type_, key) in [
+        self.chord(self.v, paste_with_shift)
+    }
+
+    fn keycode(&self, letter: Letter) -> Result<u8> {
+        Ok(match letter {
+            Letter::A => self.a,
+            Letter::C => self.c,
+            Letter::V => self.v,
+        })
+    }
+
+    /// Ctrl (and Shift) with `key`, through XTEST.
+    fn chord(&self, key: u8, with_shift: bool) -> Result<()> {
+        for (type_, code) in [
             (KEY_PRESS, self.control),
             (KEY_PRESS, self.shift),
-            (KEY_PRESS, self.v),
-            (KEY_RELEASE, self.v),
+            (KEY_PRESS, key),
+            (KEY_RELEASE, key),
             (KEY_RELEASE, self.shift),
             (KEY_RELEASE, self.control),
         ] {
-            if key == self.shift && !paste_with_shift {
+            if code == self.shift && !with_shift {
                 continue;
             }
-            xtest::fake_input(&self.connection, type_, key, 0, self.root, 0, 0, 0)?.check()?;
+            xtest::fake_input(&self.connection, type_, code, 0, self.root, 0, 0, 0)?.check()?;
         }
         self.connection.flush()?;
         Ok(())
@@ -550,25 +741,32 @@ impl X11Paster {
 /// The evdev code of the V key (`KEY_V`).
 const EVDEV_KEY_V: usize = 47;
 
+#[cfg(test)]
 fn paste_keys(with_shift: bool) -> Vec<String> {
+    chord_keys(Letter::V, with_shift)
+}
+
+fn chord_keys(letter: Letter, with_shift: bool) -> Vec<String> {
     // wtype numbers its keymap in order of first use from evdev code 1, so a
     // bare `-k v` sends evdev 1 (Escape in the standard keymap). Hyprland
     // reads virtual-keyboard keys through its configured layout to match
     // binds, so it saw Ctrl+Shift+Escape and a user bind swallowed the paste
     // (#444). Releasing distinct, never-pressed placeholder keysyms first puts
-    // V on evdev KEY_V, which any compositor's layout also reads as V.
-    let mut keys: Vec<String> = (0..EVDEV_KEY_V - 1)
+    // V on evdev KEY_V, which any compositor's layout also reads as V. A
+    // and C likewise land on KEY_A and KEY_C.
+    let mut keys: Vec<String> = (0..letter.evdev() - 1)
         .flat_map(|index| ["-p".to_owned(), format!("U{:04X}", 0x2460 + index)])
         .collect();
+    let key = letter.name();
     let chord: &[&str] = if with_shift {
         &[
-            "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl",
+            "-M", "ctrl", "-M", "shift", "-k", key, "-m", "shift", "-m", "ctrl",
         ]
     } else {
-        &["-M", "ctrl", "-k", "v", "-m", "ctrl"]
+        &["-M", "ctrl", "-k", key, "-m", "ctrl"]
     };
     keys.extend(chord.iter().map(|key| (*key).to_owned()));
-    // GTK 3's reverse keymap lookup skips the final keycode. Keep V before a
+    // GTK 3's reverse keymap lookup skips the final keycode. Keep the key before a
     // neutral VoidSymbol release so its shortcut remains discoverable (#28).
     keys.extend(["-p".to_owned(), "VoidSymbol".to_owned()]);
     keys
@@ -673,6 +871,59 @@ fn run_helper(
         let _ = child.wait();
     }
     result
+}
+
+/// Runs `command` and returns its standard output, or `None` when it exits
+/// with a failure (`wl-paste` with nothing copied). Bounded by `timeout` and
+/// [`READ_CAP`].
+fn read_helper(
+    mut command: Command,
+    stop: &AtomicBool,
+    timeout: Duration,
+) -> Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    if stop.load(Ordering::Acquire) {
+        return Err(eyre!("cancelled before reading the clipboard"));
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .wrap_err("could not start wl-paste; install wl-clipboard")?;
+    let process_group = child.id();
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| eyre!("missing helper stdout"))?;
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        (&mut stdout)
+            .take(READ_CAP)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes)
+    });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
+        }
+        if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
+            break None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let Some(status) = status else {
+        unsafe { libc::kill(-(process_group as i32), libc::SIGKILL) };
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(eyre!("reading the clipboard timed out"));
+    };
+    let bytes = reader
+        .join()
+        .map_err(|_| eyre!("the clipboard reader panicked"))??;
+    Ok(status.success().then_some(bytes))
 }
 
 #[cfg(test)]

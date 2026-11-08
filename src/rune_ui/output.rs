@@ -203,6 +203,11 @@ pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
     if ui.records_shortcuts() {
         content = content.child(without_processing(ui, p));
     }
+    // Labs › Transform typed text (Linux): its shortcut, while the lab is on.
+    #[cfg(target_os = "linux")]
+    if ui.records_shortcuts() && crate::labs::Feature::TextCleanup.on(&ui.settings) {
+        content = content.child(transform_typed_text(ui, p));
+    }
     super::scroll_body(p.k, "output-scroll", content)
 }
 
@@ -382,6 +387,30 @@ fn without_processing(ui: &Ui, p: Paint) -> El {
             tr("Dictate without processing"),
             ShortcutTarget::RawDictation,
             Some(tr("Pastes your words as Hex heard them")),
+        ),
+    )
+}
+
+/// Labs › Transform typed text: a shortcut that runs the steps above over the
+/// focused field's text and pastes the result in its place. Unbound until
+/// the person records one.
+#[cfg(target_os = "linux")]
+fn transform_typed_text(ui: &Ui, p: Paint) -> El {
+    labeled(
+        p,
+        "transform-typed-text",
+        tr("Typed text"),
+        tr("Same steps, no dictation"),
+        super::general::shortcut_rows(
+            ui,
+            p,
+            "cleanup",
+            &super::icons::KEYBOARD,
+            tr("Transform typed text"),
+            ShortcutTarget::Cleanup,
+            Some(tr(
+                "Runs the steps above on the focused field and replaces its text",
+            )),
         ),
     )
 }

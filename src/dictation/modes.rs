@@ -62,6 +62,29 @@ impl ModeRuntime {
         processed
     }
 
+    /// The matching mode's steps over text someone typed (Labs › Clean up
+    /// text), without the dictation-only ones; transformations read
+    /// `context.source` as `"cleanup"`. `cancelled` stops it between steps.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn process_typed(
+        &self,
+        text: &str,
+        context: &crate::dictation::context::ContextSnapshot,
+        transformations: &crate::personal_commands::TransformationClient,
+        cancelled: &AtomicBool,
+    ) -> Processed {
+        let text = self.replacements.replace(text);
+        let profile = self.profile(context);
+        let mut processed = Profiles::new(profile).process_typed(&text, context, cancelled);
+        processed.apply_transformations_as(
+            crate::personal_commands::Source::Cleanup,
+            transformations,
+            context,
+            cancelled,
+        );
+        processed
+    }
+
     /// The matching mode's profile, or Global's.
     fn profile(&self, context: &crate::dictation::context::ContextSnapshot) -> Profile {
         let mode = mode_for_context(

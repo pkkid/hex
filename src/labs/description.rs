@@ -15,6 +15,9 @@ impl Feature {
             Self::Playground => "Scene and story browser in the window",
             Self::LiveText => "Show provisional words beside the HUD while dictating",
             Self::FailureNotices => "Show why a dictation failed beside the HUD",
+            Self::TextCleanup => {
+                "Press a shortcut (cleanup_hotkey) to run your Output steps on the text in any field and put the result back, without dictating"
+            }
             Self::LiveTyping => {
                 "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
             }

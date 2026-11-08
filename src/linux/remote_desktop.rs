@@ -25,6 +25,7 @@ const KEYBOARD: u32 = 1;
 const PERSIST_UNTIL_REVOKED: u32 = 2;
 const XK_CONTROL_L: i32 = 0xffe3;
 const XK_SHIFT_L: i32 = 0xffe1;
+#[cfg(test)]
 const XK_V: i32 = 0x76;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
@@ -150,8 +151,10 @@ impl RemoteDesktop {
     }
 
     /// Presses and releases Ctrl+V, or Ctrl+Shift+V for terminals.
-    pub(crate) fn paste(&self, with_shift: bool) -> Result<()> {
-        for (keysym, state) in paste_keys(with_shift) {
+    /// Ctrl (and Shift) with the key `keysym` names: V pastes, A selects
+    /// all, C copies.
+    pub(crate) fn chord(&self, keysym: i32, with_shift: bool) -> Result<()> {
+        for (keysym, state) in chord_keys(keysym, with_shift) {
             self.bus.call_portal(
                 "NotifyKeyboardKeysym",
                 &(
@@ -176,12 +179,17 @@ impl Drop for RemoteDesktop {
     }
 }
 
+#[cfg(test)]
 fn paste_keys(with_shift: bool) -> Vec<(i32, u32)> {
+    chord_keys(XK_V, with_shift)
+}
+
+fn chord_keys(key: i32, with_shift: bool) -> Vec<(i32, u32)> {
     let mut keys = vec![(XK_CONTROL_L, PRESSED)];
     if with_shift {
         keys.push((XK_SHIFT_L, PRESSED));
     }
-    keys.extend([(XK_V, PRESSED), (XK_V, RELEASED)]);
+    keys.extend([(key, PRESSED), (key, RELEASED)]);
     if with_shift {
         keys.push((XK_SHIFT_L, RELEASED));
     }

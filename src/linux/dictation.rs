@@ -55,6 +55,8 @@ enum OutputJob {
     Dictation(Job),
     /// Pastes the newest completed dictation again.
     PasteLast,
+    /// Labs › Transform typed text over the focused field.
+    Cleanup,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -63,6 +65,7 @@ enum OutputKind {
     /// A dictation printed by `hex dictation stop --print`.
     Printed,
     PasteLast,
+    Cleanup,
 }
 
 /// A release whose capture is still collecting its post-release tail.
@@ -182,6 +185,7 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .raw_dictation_hotkey
             .as_ref()
             .map(LinuxHotkey::from),
+        cleanup: settings.active_cleanup_hotkey().map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled
@@ -381,6 +385,30 @@ pub(crate) fn run(
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
                     if result_sender.send((OutputKind::PasteLast, result)).is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                OutputJob::Cleanup => {
+                    let modes = output_settings
+                        .modes
+                        .read()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .clone();
+                    let result = paster
+                        .as_mut()
+                        .map_err(|error| eyre!("{error:#}"))
+                        .and_then(|paster| {
+                            crate::linux::text_cleanup::clean_up(
+                                paster,
+                                &modes,
+                                &output_settings.transformations,
+                                &worker_stop,
+                            )
+                        })
+                        .map(|cleaned| format!("{cleaned:?}"))
+                        .map_err(|error| format!("{error:#}"));
+                    if result_sender.send((OutputKind::Cleanup, result)).is_err() {
                         break;
                     }
                     continue;
@@ -889,6 +917,20 @@ pub(crate) fn run(
                         }
                     }
                 }
+                // Labs › Transform typed text, gated here where its work starts.
+                HotkeyEvent::Cleanup if !capture.is_recording() && crate::labs::text_cleanup() => {
+                    match jobs.try_send(OutputJob::Cleanup) {
+                        // The stop sound: received, now working on it.
+                        Ok(()) => {
+                            pending += 1;
+                            feedback::play(Tone::DictationStop);
+                        }
+                        Err(TrySendError::Full(_)) => fail(&events, "Hex is busy; try again")?,
+                        Err(TrySendError::Disconnected(_)) => {
+                            return Err(eyre!("dictation worker is unavailable"));
+                        }
+                    }
+                }
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
                     cancel_typing(&mut active_typing);
@@ -919,6 +961,22 @@ pub(crate) fn run(
             if kind == OutputKind::PasteLast {
                 if let Err(error) = result {
                     fail(&events, error)?;
+                }
+                continue;
+            }
+            // A cleanup holds the HUD while it runs but is no dictation.
+            if kind == OutputKind::Cleanup {
+                pending = pending.saturating_sub(1);
+                indicator.finished(result.as_ref().err().map(String::as_str));
+                match result {
+                    Ok(outcome) => {
+                        tracing::info!(outcome, "cleaned up the focused field");
+                        feedback::play(Tone::DictationDone);
+                    }
+                    Err(error) => {
+                        tracing::info!(%error, "left the focused field alone");
+                        fail(&events, error)?;
+                    }
                 }
                 continue;
             }

@@ -60,6 +60,8 @@ pub(crate) enum ShortcutTarget {
     RawDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
+    /// Labs › Transform typed text.
+    Cleanup,
 }
 
 struct PreparedTranscription {
@@ -1099,6 +1101,7 @@ impl LinuxDesktopHost {
                             settings.raw_dictation_hotkey = Some(binding)
                         }
                         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
+                        ShortcutTarget::Cleanup => settings.cleanup_hotkey = Some(binding),
                     }
                 })
             }));

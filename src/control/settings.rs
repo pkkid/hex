@@ -220,6 +220,12 @@ const KEYS: &[Key] = &[
          external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
          turns it off",
     ),
+    optional(
+        "cleanup_hotkey",
+        Kind::Shortcut(HotkeySlot::Cleanup),
+        "Labs: runs the Output steps over the focused field's text and pastes the result \
+         back (Linux, with labs.text_cleanup); none (the default) turns it off",
+    ),
     key(
         "screenshots.hotkey",
         Kind::Shortcut(HotkeySlot::Screenshot),
@@ -288,6 +294,11 @@ const KEYS: &[Key] = &[
         "labs.live_typing",
         Kind::Bool,
         "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
+    ),
+    key(
+        "labs.text_cleanup",
+        Kind::Bool,
+        "Labs: cleanup_hotkey runs the Output steps over the focused field's text and pastes the result back (Linux)",
     ),
     key(
         "labs.settings_search",
@@ -1045,6 +1056,7 @@ pub fn apply(
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
         | "second_dictation_hotkey"
+        | "cleanup_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
         | "capture.hotkey"
@@ -1057,6 +1069,7 @@ pub fn apply(
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                HotkeySlot::Cleanup => candidate.cleanup_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 #[cfg(hex_capture)]

@@ -22,6 +22,7 @@ pub(crate) mod remote_desktop;
 pub(crate) mod rune_hud;
 pub(crate) mod service;
 pub(crate) mod session;
+pub(crate) mod text_cleanup;
 pub(crate) mod tray;
 
 use std::path::PathBuf;

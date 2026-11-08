@@ -586,6 +586,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
         ));
         rows.push(row(
+            Feature::TextCleanup,
+            Some(&KEYBOARD),
+            tr("Transform typed text"),
+            tr("Press a shortcut to run your Output steps on any field's text and replace it, without dictating"),
+        ));
+        rows.push(row(
             Feature::GnomeClipboardRestore,
             None,
             tr("Restore clipboard on GNOME"),
@@ -751,6 +757,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::LiveText => "lab-live-text",
         Feature::FailureNotices => "lab-failure-notices",
         Feature::LiveTyping => "lab-live-typing",
+        Feature::TextCleanup => "lab-text-cleanup",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::TerminalPaste => "lab-terminal-paste",

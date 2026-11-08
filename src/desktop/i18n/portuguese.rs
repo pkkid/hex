@@ -1176,6 +1176,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Tente outra pesquisa"),
     ("Descriptive meeting file names", "Nomes descritivos para arquivos de reunião"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Renomeia o Markdown exportado da reunião com o título dela assim que as notas ou uma renomeação fornecerem um, mantendo a data e a hora"),
+    ("Transform typed text", "Transformar texto digitado"),
+    ("Press a shortcut to run your Output steps on any field's text and replace it, without dictating", "Pressione um atalho para aplicar suas etapas de Saída ao texto de qualquer campo e substituí-lo, sem ditar"),
+    ("Typed text", "Texto digitado"),
+    ("Same steps, no dictation", "Mesmas etapas, sem ditado"),
+    ("Runs the steps above on the focused field and replaces its text", "Aplica as etapas acima ao campo em foco e substitui o texto dele"),
 ];
 
 #[cfg(test)]
