@@ -123,6 +123,9 @@ impl Feature {
             Self::MeetingFinishedEvent => {
                 "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
             }
+            Self::GnomeAnnotate => {
+                "Show Annotate's recording capsule and ink over your screen on GNOME Wayland, through XWayland while XWayland is running, so you can draw"
+            }
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
             }

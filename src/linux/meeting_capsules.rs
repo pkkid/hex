@@ -11,18 +11,23 @@
 pub(crate) fn on_xwayland() -> bool {
     floats_on_xwayland(
         crate::labs::gnome_meeting_capsules(),
-        || {
-            crate::linux::session::LinuxSession::detect().is_wayland()
-                && !crate::linux::paste::wayland_offers(crate::linux::rune_hud::LAYER_SHELL)
-        },
+        without_layer_shell,
         crate::linux::clipboard::xwayland_running,
     )
+}
+
+/// A Wayland session whose compositor offers no layer-shell (GNOME), where
+/// an overlay that takes clicks can only float on XWayland. It connects to
+/// the compositor, so callers ask once per show, never per frame.
+pub(crate) fn without_layer_shell() -> bool {
+    crate::linux::session::LinuxSession::detect().is_wayland()
+        && !crate::linux::paste::wayland_offers(crate::linux::rune_hud::LAYER_SHELL)
 }
 
 /// Only with the lab on, on a Wayland compositor without layer-shell, and
 /// while XWayland already runs. Each check runs only when the ones before
 /// pass, so with the lab off Hex never looks for layer-shell or XWayland.
-fn floats_on_xwayland(
+pub(super) fn floats_on_xwayland(
     opted_in: bool,
     without_layer_shell: impl FnOnce() -> bool,
     running: impl FnOnce() -> bool,

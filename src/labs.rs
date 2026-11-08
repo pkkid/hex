@@ -110,6 +110,7 @@ pub enum Feature {
     NotchIndicator,
     MeetingFinishedEvent,
     GnomeMeetingCapsules,
+    GnomeAnnotate,
     Screenshots,
     FollowLiveTranscript,
     MoreCallApps,
@@ -121,7 +122,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -169,6 +170,7 @@ impl Feature {
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
         Self::GnomeMeetingCapsules,
+        Self::GnomeAnnotate,
         Self::Screenshots,
         Self::FollowLiveTranscript,
         Self::MoreCallApps,
@@ -248,6 +250,7 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
+            | Self::GnomeAnnotate
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
@@ -315,7 +318,8 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::QuitClosesWindow
             | Self::ExpireMeetingAudio
-            | Self::FailureNotices => 20261107,
+            | Self::FailureNotices
+            | Self::GnomeAnnotate => 20261107,
         }
     }
 
@@ -359,6 +363,7 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::GnomeMeetingCapsules
             | Self::LiveTyping => cfg!(target_os = "linux"),
+            Self::GnomeAnnotate => cfg!(all(target_os = "linux", hex_capture)),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -464,6 +469,7 @@ impl Feature {
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
+            Self::GnomeAnnotate => "gnome-annotate",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::MoreCallApps => "more-call-apps",
@@ -525,6 +531,7 @@ impl Feature {
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
+            Self::GnomeAnnotate => "labs.gnome_annotate",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::MoreCallApps => "labs.more_call_apps",
@@ -590,6 +597,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
+            Self::GnomeAnnotate => settings.labs.gnome_annotate,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::MoreCallApps => settings.labs.more_call_apps,
@@ -653,6 +661,7 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
+            &mut labs.gnome_annotate,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
             &mut labs.more_call_apps,
@@ -716,6 +725,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
+            Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             Self::MoreCallApps => settings.labs.more_call_apps = on,
@@ -787,6 +797,8 @@ const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
 const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
 /// The next bit above descriptive meeting file names.
 const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
+/// The next bit above failure notices.
+const GNOME_ANNOTATE: u64 = FAILURE_NOTICES << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1004,6 +1016,14 @@ pub fn gnome_meeting_capsules() -> bool {
     on(GNOME_MEETING_CAPSULES) && Feature::GnomeMeetingCapsules.on_this_os()
 }
 
+/// On a Wayland desktop without layer-shell (GNOME), Annotate's capsule and
+/// ink float on an already running XWayland, so the pen draws (Linux; read
+/// as each overlay shows and on each ink frame).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn gnome_annotate() -> bool {
+    on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
+}
+
 /// The local API's `GET /meetings/events` serves, and a meeting's final
 /// publication sends, its id (every OS with meetings; read where the route
 /// starts, on each pass of its stream, and at each publication).
@@ -1207,6 +1227,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::GnomeMeetingCapsules,
             settings.gnome_meeting_capsules,
             GNOME_MEETING_CAPSULES,
+        ),
+        (
+            Feature::GnomeAnnotate,
+            settings.gnome_annotate,
+            GNOME_ANNOTATE,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
     ]
@@ -1650,6 +1675,19 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
         assert_eq!(state & LIVE_TYPING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    }
+
+    #[test]
+    fn gnome_annotate_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & GNOME_ANNOTATE, 0);
+        labs.gnome_annotate = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & GNOME_ANNOTATE, 0);
+        assert_eq!(state & GNOME_MEETING_CAPSULES, 0);
+        assert_eq!(state & FAILURE_NOTICES, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 

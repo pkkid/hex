@@ -190,6 +190,9 @@ pub(crate) struct InkState {
     pointer: [f32; 2],
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pressed_at: [f32; 2],
+    /// Shown on XWayland, by Labs › Annotate on GNOME (Linux), decided as
+    /// it shows.
+    xwayland: bool,
 }
 
 impl InkState {
@@ -213,7 +216,26 @@ impl InkState {
             drawing: false,
             pointer: [0.0; 2],
             pressed_at: [0.0; 2],
+            xwayland: false,
         }
+    }
+}
+
+/// What the overlay takes. Not drawing, every click passes through. On
+/// XWayland that is regions with none set: a window made click-through
+/// there can't take the pointer later, so it is made taking regions.
+fn input(drawing: bool, xwayland: bool) -> rune::OverlayInput {
+    if !drawing {
+        if xwayland {
+            rune::OverlayInput::Regions
+        } else {
+            rune::OverlayInput::None
+        }
+    } else if cfg!(target_os = "linux") {
+        // Everything but the capsule's pill (`draw_surface`).
+        rune::OverlayInput::Regions
+    } else {
+        rune::OverlayInput::All
     }
 }
 
@@ -269,16 +291,10 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     if drawing != s.drawing {
         s.drawing = drawing;
         if let Some(overlay) = &s.overlay {
-            overlay.set_input(if !drawing {
-                rune::OverlayInput::None
-            } else if cfg!(target_os = "linux") {
-                // Everything but the capsule's pill (`draw_surface`).
-                rune::OverlayInput::Regions
-            } else {
-                rune::OverlayInput::All
-            });
-            // For Escape, where the desktop gives the overlay the keyboard.
-            if drawing {
+            overlay.set_input(input(drawing, s.xwayland));
+            // For Escape, where the desktop gives the overlay the keyboard
+            // (never on XWayland).
+            if drawing && !s.xwayland {
                 overlay.request_keys();
             }
         }
@@ -301,6 +317,14 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         }
         if !s.shown {
             s.shown = true;
+            // Where Wayland has no layer-shell (GNOME), it floats on
+            // XWayland only by Labs › Annotate on GNOME.
+            #[cfg(target_os = "linux")]
+            {
+                s.xwayland = crate::linux::annotate_overlays::on_xwayland();
+                overlay.set_xwayland_input(s.xwayland);
+                overlay.set_input(input(s.drawing, s.xwayland));
+            }
             overlay.show();
         }
     }
@@ -313,6 +337,18 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     }
     s.scene = scene;
     changed
+}
+
+/// Escape while drawing, where the desktop can give the overlay the
+/// keyboard. A Wayland compositor without layer-shell (GNOME) can't, and
+/// XWayland never shows an overlay that asks for keys, so there it asks for
+/// none and Labs › Annotate on GNOME can float it.
+fn keys() -> rune::KeyPolicy {
+    #[cfg(target_os = "linux")]
+    if crate::linux::meeting_capsules::without_layer_shell() {
+        return rune::KeyPolicy::None;
+    }
+    rune::KeyPolicy::OnDemand
 }
 
 /// Told when drawing starts or stops (the capsule lights its pen).
@@ -357,7 +393,7 @@ impl InkOverlay {
                 input: OverlayInput::None,
                 prewarm: true,
                 // Escape while drawing, asked for only then.
-                keys: rune::KeyPolicy::OnDemand,
+                keys: keys(),
                 ..Default::default()
             })
             .release_gpu_when_hidden()

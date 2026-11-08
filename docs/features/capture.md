@@ -77,6 +77,24 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   fractionally scaled monitor. Known gap: the overlay starts below a
 │   desktop bar's reserved area, so saved ink sits that bar's height off
 │   the live ink
+├── GNOME on Wayland (no layer-shell) -> the capsule and the ink can't open, so
+│   a capture records with nothing to draw on, unless Labs › Annotate on GNOME
+│   (`gnome-annotate`, off by default) floats both on an already running
+│   Xwayland (linux/annotate_overlays, decided at each show). There the ink
+│   asks for no keys, so Esc doesn't stop the pen (the capsule's pen or a tap
+│   of the key does), and takes regions, none while not drawing, since an
+│   Xwayland window made click-through can't take the pointer later.
+│   Known defect: Rune at the pinned rev never sets an Xwayland overlay's
+│   input shape on a drawn frame (overlay/draw.rs publishes hit regions for
+│   macOS, Windows, X11 and layer-shell only), so the capsule, which redraws
+│   every second, keeps an empty shape and takes no clicks, and the ink's
+│   regions arrive only on an unchanged frame (a first click). A one-line
+│   Rune fix (`surface.regions(self.rt.hit_regions())` beside the layer-shell
+│   line) makes both work; until Rune has it, the lab is incomplete.
+│   Check: labs gnome_annotate_is_its_own_bit_and_off_by_default. Observed on
+│   GNOME Shell 51.1 Wayland (Fedora 45, 3440x1440, scale 1) with that Rune fix applied
+│   locally: the capsule's buttons click and the pen draws; Esc doesn't stop
+│   it
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux

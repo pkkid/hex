@@ -668,6 +668,10 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
             if shown {
+                // Where Wayland has no layer-shell (GNOME), it floats on
+                // XWayland only by Labs › Annotate on GNOME.
+                #[cfg(target_os = "linux")]
+                overlay.set_xwayland_input(crate::linux::annotate_overlays::on_xwayland());
                 overlay.show();
             } else {
                 overlay.hide();

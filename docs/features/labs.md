@@ -99,6 +99,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the Meetings pane (#1271), whose note names the lab (#1274)
 │                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
+├── Annotate on GNOME no labs.gnome_annotate (Linux, group Annotate) on a Wayland desktop without layer-shell (GNOME), Annotate's recording capsule
+│                                        (its pen) and the ink overlay open on XWayland, as the meeting capsules do, decided at each show, only while this
+│                                        user's Xwayland already runs; never starts it. The ink there asks for no keys (Esc can't stop the pen; the
+│                                        capsule's pen or a tap of the key can) and takes regions, none while not drawing. Off, a capture records with
+│                                        nothing on screen to draw on
+│                                        needs a one-line Rune fix for clicks (capture.md, GNOME on Wayland); without it the capsule takes no clicks
+│                                        // checks: gnome_annotate_is_its_own_bit_*; the meeting capsules' floats_only_by_opt_in_*; observed on GNOME Wayland with the fix
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)

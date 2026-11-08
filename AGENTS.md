@@ -1306,6 +1306,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   session without layer-shell and only while this user's XWayland process
   already runs; Hex decides at each show and never starts XWayland. Off, or
   when the overlay still can't open, an offer opens the Meetings pane (#1271).
+  A third, Labs › Annotate on GNOME (`gnome-annotate`, off by default), lets
+  Annotate's recording capsule and ink overlay open on XWayland under the
+  same rules, so the pen draws; there the ink asks for no keyboard (Esc
+  can't stop the pen) and takes input regions, none while not drawing.
   Everything else stays on Wayland. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
