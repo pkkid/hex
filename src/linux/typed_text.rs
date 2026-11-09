@@ -16,9 +16,17 @@ use crate::linux::paste::LinuxPaster;
 
 /// How long the focused app gets to put the selection on the clipboard.
 /// The job polls until text appears, so a fast app is not held back.
-const COPY_DEADLINE: Duration = Duration::from_millis(500);
+const COPY_DEADLINE: Duration = Duration::from_millis(600);
 /// How often the job re-reads the clipboard while it waits.
-const COPY_POLL: Duration = Duration::from_millis(100);
+const COPY_POLL: Duration = Duration::from_millis(40);
+/// The pause between Ctrl+A and Ctrl+C, so the focused app has selected the
+/// text before it is asked to copy it.
+const SELECT_SETTLE: Duration = Duration::from_millis(30);
+/// The pause after Ctrl+C before the first clipboard read. On GNOME (no
+/// data-control protocol) each read is a wl-paste that briefly takes focus
+/// with its own surface; read at once and Mutter can hand it focus before it
+/// delivers the Ctrl+C, so the copy never reaches the focused app.
+const COPY_SETTLE: Duration = Duration::from_millis(40);
 /// Typed text has no spoken language. The only language-sensitive step is
 /// the dictation-only filler-word filter, which skips typed text, so this
 /// value never changes the result.
@@ -156,6 +164,7 @@ where
     // trusted, so the job stops before it reads or pastes anything.
     clear(clipboard, "before copying the selection")?;
     clipboard.select_all()?;
+    thread::sleep(SELECT_SETTLE);
     clipboard.copy_selection()?;
     let Some(text) = wait_for_text(clipboard, stop)? else {
         return Err(eyre!("no text was selected"));
@@ -213,6 +222,7 @@ fn clear<C: ClipboardJob>(clipboard: &mut C, when: &str) -> Result<()> {
 /// [`COPY_DEADLINE`] passes, checking the stop flag between reads.
 fn wait_for_text<C: ClipboardJob>(clipboard: &mut C, stop: &AtomicBool) -> Result<Option<String>> {
     let deadline = Instant::now() + COPY_DEADLINE;
+    thread::sleep(COPY_SETTLE);
     loop {
         if stop.load(Ordering::Acquire) {
             return Err(eyre!("typed text cancelled while stopping the listener"));
